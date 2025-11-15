@@ -175,18 +175,18 @@ def generate_video(
     #pipe.scheduler = CogVideoXDDIMScheduler.from_config(pipe.scheduler.config, timestep_spacing="trailing")
     pipe.scheduler = CogVideoXDPMScheduler.from_config(pipe.scheduler.config, timestep_spacing="trailing")
 
-    # 3. Enable CPU offload for the model.
-    # turn off if you have multiple GPUs or enough GPU memory(such as H100) and it will cost less time in inference
-    # and enable to("cuda")
-
-    if torch.backends.mps.is_available():
-        pipe.to("mps")
-
-    else:
+    # 3. Device placement
+    # On macOS MPS, CogVideoX uses float64 internally and fails on MPS.
+    # Fallback to CPU for stability.
+    if torch.cuda.is_available():
         pipe.to("cuda")
         pipe.enable_sequential_cpu_offload()
         pipe.vae.enable_slicing()
         pipe.vae.enable_tiling()
+    elif torch.backends.mps.is_available():
+        pipe.to("mps", torch.float32)
+    else:
+        pipe.to("cpu", torch.float32)
 
     # 4. Generate the video frames based on the prompt.
     # `num_frames` is the Number of frames to generate.

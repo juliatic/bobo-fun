@@ -9,6 +9,15 @@ from kivy.lang import Builder
 from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition
 from kivy.properties import DictProperty, StringProperty, ObjectProperty, ListProperty
 from kivy.clock import Clock
+from kivy.uix.popup import Popup
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.button import Button
+from kivy.uix.label import Label
+from kivy.uix.textinput import TextInput
+from kivy.uix.slider import Slider
+from kivy.uix.spinner import Spinner
+from kivy.uix.switch import Switch
+from kivy.uix.filechooser import FileChooserIconView
 
 KV = """
 ScreenManager:
@@ -48,14 +57,14 @@ ScreenManager:
             id: model_title
             text: root.model_name
             size_hint_y: None
-            height: '40dp'
+            height: '50dp'
         ScrollView:
             GridLayout:
                 id: form
                 cols: 2
                 size_hint_y: None
                 height: self.minimum_height
-                row_default_height: '40dp'
+                row_default_height: '48dp'
                 row_force_default: True
         BoxLayout:
             size_hint_y: None
@@ -362,6 +371,37 @@ MODEL_REGISTRY = {
     }
 }
 
+SAFE_LIMITS = {
+    'cogvideo': {
+        'width': 720,
+        'height': 480,
+        'fps': 16,
+        'num_frames': 49,
+        'num_inference_steps': 100,
+    },
+    'cogvideofun': {
+        'width': 512,
+        'height': 320,
+        'fps': 16,
+        'num_frames': 41,
+        'num_inference_steps': 100,
+    },
+    'hyvideo': {
+        'width': 640,
+        'height': 480,
+        'fps': 15,
+        'num_frames': 61,
+        'num_inference_steps': 50,
+    },
+    'wan_video': {
+        'width': 832,
+        'height': 480,
+        'fps': 12,
+        'num_frames': 17,
+        'num_inference_steps': 25,
+    },
+}
+
 class HomeScreen(Screen):
     def on_enter(self):
         Clock.schedule_once(self._populate, 0)
@@ -400,57 +440,94 @@ class ConfigScreen(Screen):
         for p in self.model_spec['params']:
             self._add_field(form, p)
     def _add_field(self, form, param):
-        from kivy.uix.label import Label
         form.add_widget(Label(text=param['key']))
         w = self._make_widget(param)
         form.add_widget(w)
     def _make_widget(self, param):
-        from kivy.uix.textinput import TextInput
-        from kivy.uix.slider import Slider
-        from kivy.uix.togglebutton import ToggleButton
-        from kivy.uix.spinner import Spinner
-        from kivy.uix.filechooser import FileChooserIconView
         t = param.get('widget', 'text')
+        if 'output_path' in param.get('key', ''):
+            t = 'file'
+        # initialize default in values
+        if 'default' in param:
+            self.values[param['key']] = param['default']
         if t == 'text':
-            ti = TextInput(text=str(param.get('default', '')))
+            ti = TextInput(text=str(param.get('default', '')), multiline=False)
             def on_text(instance, value):
                 self.values[param['key']] = value
             ti.bind(text=on_text)
             return ti
         if t == 'slider':
             mi = param.get('min', 0)
-            ma = param.get('max', 100)
+            limit = SAFE_LIMITS.get(self.model_key, {}).get(param['key'])
+            ma = min(param.get('max', 100), limit) if limit else param.get('max', 100)
             de = param.get('default', mi)
-            sl = Slider(min=mi, max=ma, value=de)
+            if de > ma:
+                de = ma
+            step = 16 if (self.model_key == 'wan_video' and param['key'] in ('width','height')) else (1 if param.get('type') == 'int' else 0)
+            sl = Slider(min=mi, max=ma, value=de, step=step)
+            val = Label(text=str(de), size_hint_x=None, width=60)
+            box = BoxLayout(orientation='horizontal', spacing=10)
+            box.add_widget(sl)
+            box.add_widget(val)
             def on_value(instance, value):
                 if param['type'] == 'int':
-                    self.values[param['key']] = int(value)
+                    iv = int(round(value))
+                    self.values[param['key']] = iv
+                    val.text = str(iv)
                 else:
-                    self.values[param['key']] = float(value)
+                    fv = float(value)
+                    self.values[param['key']] = fv
+                    val.text = f"{fv:.2f}"
             sl.bind(value=on_value)
-            return sl
+            return box
         if t == 'toggle':
-            tb = ToggleButton(text='On' if param.get('default', False) else 'Off', state='down' if param.get('default', False) else 'normal')
-            def on_state(instance, value):
-                self.values[param['key']] = value == 'down'
-                instance.text = 'On' if value == 'down' else 'Off'
-            tb.bind(state=on_state)
-            return tb
+            sw = Switch(active=bool(param.get('default', False)))
+            def on_active(instance, value):
+                self.values[param['key']] = bool(value)
+            sw.bind(active=on_active)
+            return sw
         if t == 'file':
-            fc = FileChooserIconView
-            fv = fc()
-            def on_selection(instance, value):
-                if value:
-                    self.values[param['key']] = value[0]
-            fv.bind(selection=on_selection)
-            return fv
+            row = BoxLayout(orientation='horizontal', spacing=10)
+            ti = TextInput(text=str(param.get('default','')), multiline=False)
+            btn = Button(text='📁', size_hint_x=None, width=50)
+            def open_picker(_):
+                chooser = FileChooserIconView(path=os.getcwd())
+                if 'output_path' in param['key']:
+                    chooser.dirselect = True
+                picker_box = BoxLayout(orientation='vertical', spacing=10)
+                action_box = BoxLayout(orientation='horizontal', size_hint_y=None, height=50, spacing=10)
+                ok_btn = Button(text='Select')
+                cancel_btn = Button(text='Cancel')
+                popup = Popup(title='Select path', content=picker_box, size_hint=(0.9,0.9))
+                def do_select(_btn):
+                    sel = chooser.selection
+                    if sel:
+                        ti.text = sel[0]
+                        self.values[param['key']] = sel[0]
+                    popup.dismiss()
+                def do_cancel(_btn):
+                    popup.dismiss()
+                ok_btn.bind(on_release=do_select)
+                cancel_btn.bind(on_release=do_cancel)
+                picker_box.add_widget(chooser)
+                action_box.add_widget(ok_btn)
+                action_box.add_widget(cancel_btn)
+                picker_box.add_widget(action_box)
+                popup.open()
+            btn.bind(on_release=open_picker)
+            def on_text(instance, value):
+                self.values[param['key']] = value
+            ti.bind(text=on_text)
+            row.add_widget(ti)
+            row.add_widget(btn)
+            return row
         if t == 'choice':
-            sp = Spinner(text=str(param.get('default')), values=param.get('choices', []))
+            sp = Spinner(text=str(param.get('default')), values=param.get('choices', []), size_hint_x=1)
             def on_text(instance, value):
                 self.values[param['key']] = value
             sp.bind(text=on_text)
             return sp
-        return TextInput(text=str(param.get('default', '')))
+        return TextInput(text=str(param.get('default', '')), multiline=False)
     def on_prepare(self):
         app = App.get_running_app()
         app.prepare_model(self.model_key, self.values)
@@ -459,7 +536,14 @@ class ConfigScreen(Screen):
         es.model_key = self.model_key
         es.model_name = self.model_spec['title']
         es.model_env = self.model_spec.get('env', {})
-        es.params = dict(self.values)
+        params = dict(self.values)
+        for k, v in (SAFE_LIMITS.get(self.model_key, {}) or {}).items():
+            if k in params:
+                try:
+                    params[k] = min(int(params[k]) if isinstance(params[k], int) else float(params[k]), v)
+                except Exception:
+                    pass
+        es.params = params
         self.manager.transition = SlideTransition(direction='left')
         self.manager.current = 'exec'
 
@@ -480,8 +564,10 @@ class ExecuteScreen(Screen):
         app = App.get_running_app()
         app.cancel_run()
     def _on_output(self, text):
-        self.log_lines.append(text)
-        self.ids.logs.text = "".join(self.log_lines[-200:])
+        def apply(_dt):
+            self.log_lines.append(text)
+            self.ids.logs.text = "".join(self.log_lines[-200:])
+        Clock.schedule_once(apply)
     def _on_done(self, rc):
         self._on_output(f"\nProcess finished with code {rc}\n")
 
@@ -508,11 +594,20 @@ class BoboApp(App):
             json.dump({'model': key, 'prepare': False, 'params': params}, f)
         env = dict(os.environ)
         env.update(env_vars or {})
-        self._proc = subprocess.Popen([sys.executable, 'backend_runner.py', '--config', tmp.name], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
+        env['PYTHONUNBUFFERED'] = '1'
+        on_output('Starting model run\n')
+        self._proc = subprocess.Popen(
+            [sys.executable, '-u', 'backend_runner.py', '--config', tmp.name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            env=env,
+            bufsize=1,
+            text=True
+        )
         def reader():
-            for line in iter(self._proc.stdout.readline, b''):
+            for line in self._proc.stdout:
                 try:
-                    on_output(line.decode('utf-8'))
+                    on_output(line)
                 except Exception:
                     pass
             rc = self._proc.wait()

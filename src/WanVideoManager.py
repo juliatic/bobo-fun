@@ -16,7 +16,8 @@ from utils.helper import check_and_make_folder
 class WanVideoManager():
     def __init__(self, device : torch.device, dtype : torch.dtype):
         self.device : torch.device = device
-        self.dtype : torch.dtype = dtype
+        # prefer fp16 on MPS to reduce memory
+        self.dtype : torch.dtype = torch.float16 if torch.backends.mps.is_available() else dtype
         # Available models: 
         # T2V: Wan-AI/Wan2.1-T2V-14B-Diffusers, Wan-AI/Wan2.1-T2V-1.3B-Diffusers
         # I2V: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers, Wan-AI/Wan2.1-I2V-14B-720P-Diffusers
@@ -33,7 +34,8 @@ class WanVideoManager():
         self.num_inference_steps = 30
         self.guidance_scale = 5.0
         self.flow_shift = 3.0 # 5.0 for 720P, 3.0 for 480P
-        self.max_area = 720 * 832
+        # constrain area for Apple Silicon
+        self.max_area = 640 * 480 if torch.backends.mps.is_available() else 720 * 832
         self.seed = None
 
     def cleanup(self):
@@ -42,6 +44,20 @@ class WanVideoManager():
         torch.mps.empty_cache()
 
     def setup(self, enable_i2v : bool):
+        # auto tune for Apple Silicon
+        if torch.backends.mps.is_available():
+            # use smaller model for t2v to avoid OOM
+            self.model_id_t2v = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+            # downscale frames if too large
+            if self.num_frames > 17:
+                self.num_frames = 17
+            if self.width * self.height > self.max_area:
+                aspect_ratio = self.height / self.width
+                self.height = round(np.sqrt(self.max_area * aspect_ratio))
+                self.width = round(np.sqrt(self.max_area / aspect_ratio))
+            # enforce divisibility by 16
+            self.width = max(16, (self.width // 16) * 16)
+            self.height = max(16, (self.height // 16) * 16)
         # set seed
         if self.seed is None:
             self.seed = int.from_bytes(os.urandom(2), "big")
@@ -84,6 +100,20 @@ class WanVideoManager():
         self.pipe.scheduler = self.scheduler
         self.pipe.to(self.device)
 
+        try:
+            self.pipe.enable_attention_slicing()
+        except Exception:
+            pass
+        try:
+            self.vae.enable_slicing()
+            self.vae.enable_tiling()
+        except Exception:
+            pass
+        try:
+            self.pipe.set_progress_bar_config(disable=True)
+        except Exception:
+            pass
+
         if enable_i2v and self.image is not None:
             print("process first frame image...")
             self.first_frame = load_image(self.image)
@@ -95,6 +125,18 @@ class WanVideoManager():
 
     @torch.inference_mode()
     def generate(self, enable_i2v : bool):
+        # final guard for MPS: clamp dimensions/frames
+        if torch.backends.mps.is_available():
+            area = self.width * self.height
+            if area > self.max_area:
+                aspect_ratio = self.height / self.width
+                self.height = round(np.sqrt(self.max_area * aspect_ratio))
+                self.width = round(np.sqrt(self.max_area / aspect_ratio))
+            if self.num_frames > 17:
+                self.num_frames = 17
+            # enforce divisibility by 16
+            self.width = max(16, (self.width // 16) * 16)
+            self.height = max(16, (self.height // 16) * 16)
         if enable_i2v:
             print("start image to video process")
             output = self.pipe(
@@ -124,6 +166,12 @@ class WanVideoManager():
         prefix = str(index).zfill(8)
         video_name = os.path.join(self.output_path, prefix + ".mp4")
         export_to_video(output, video_name, fps=self.fps)
+        del output
+        gc.collect()
+        try:
+            torch.mps.empty_cache()
+        except Exception:
+            pass
 
     def set_prompt(self, prompt : str) -> None:
             self.prompt = prompt

@@ -47,8 +47,9 @@ def run_hidream(params, prepare=False):
     mgr.cleanup()
 
 def run_wan_video(params, prepare=False):
-    from src.WanVideoManager import WanVideoManager
+    from src.WanVideoManager import WanVideoManager, replace_wan_transformer, revert_wan_transformer
     device = set_device()
+    originals = replace_wan_transformer() if torch.backends.mps.is_available() else None
     mgr = WanVideoManager(device, torch.bfloat16)
     enable_i2v = bool(params.get('enable_i2v', False))
     if params.get('prompt'):
@@ -70,6 +71,11 @@ def run_wan_video(params, prepare=False):
     mgr.setup(enable_i2v=enable_i2v)
     mgr.generate(enable_i2v=enable_i2v)
     mgr.cleanup()
+    if originals:
+        try:
+            revert_wan_transformer(*originals)
+        except Exception:
+            pass
 
 def run_ltxvideo(params, prepare=False):
     from src.LTXvideoManager import LTXVideoManager
@@ -289,6 +295,8 @@ def main():
     model = cfg['model']
     prepare = bool(cfg.get('prepare', False))
     params = cfg.get('params', {})
+    print(f"Starting backend for {model} | prepare={prepare}")
+    sys.stdout.flush()
     if model not in RUNNERS:
         print(f'Unknown model {model}')
         sys.exit(1)

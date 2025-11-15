@@ -10,6 +10,32 @@ import requests
 from tqdm import tqdm
 from PIL import Image
 
+def _patch_diffusers_mps_dtype():
+    try:
+        import diffusers.models.embeddings as emb_mod
+    except Exception:
+        return
+    def _get_1d(embed_dim, pos, output_type="pt"):
+        if isinstance(pos, torch.Tensor):
+            device = pos.device
+            pos_t = pos.reshape(-1).to(torch.float32)
+        else:
+            pos_arr = np.array(pos, dtype=np.float32).reshape(-1)
+            pos_t = torch.tensor(pos_arr, dtype=torch.float32)
+            device = torch.device("cpu")
+        half = embed_dim // 2
+        omega = torch.arange(half, dtype=torch.float32, device=device)
+        omega = 1.0 / (10000 ** (omega / float(half)))
+        out = pos_t[:, None] * omega[None, :]
+        emb = torch.cat([torch.sin(out), torch.cos(out)], dim=1)
+        if output_type == "pt":
+            return emb
+        return emb.detach().cpu().numpy().astype(np.float32)
+    try:
+        emb_mod.get_1d_sincos_pos_embed_from_grid = _get_1d
+    except Exception:
+        pass
+
 def set_device():
     print('Pytorch version', torch.__version__)
     if torch.backends.mps.is_available():
@@ -19,6 +45,7 @@ def set_device():
         os.environ["PYTORCH_MPS_VISUALIZE_ALLOCATIONS"] = "1"
         os.environ["PYTORCH_MPS_TENSOR_CORE_ENABLED"] = "1"
         os.environ["ACCELERATE_USE_MPS_DEVICE"] = "1"
+        _patch_diffusers_mps_dtype()
         #os.environ["PYTORCH_MPS_PINNED_MAX_MEMORY_RATIO"] = "0.0"
         #os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = "0.0" # 最好不用, 用了也超级慢
     elif torch.cuda.is_available():
