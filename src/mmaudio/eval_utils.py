@@ -17,7 +17,7 @@ from src.mmaudio.utils.download_utils import download_model_if_needed
 log = logging.getLogger()
 
 import os
-MODEL_PREFIX = os.path.expanduser("~/.cache/huggingface/hub/models--hkchengrex--MMAudio")
+MODEL_PREFIX = os.path.join(os.environ.get("HF_HUB_CACHE", os.path.join(os.getcwd(), "models")), "models--hkchengrex--MMAudio")
 
 @dataclasses.dataclass
 class ModelConfig:

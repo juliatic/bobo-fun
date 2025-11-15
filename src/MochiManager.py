@@ -19,7 +19,8 @@ class MochiManager():
         self.device     : torch.device = device
         self.dtype      : torch.dtype = dtype
         self.model      : str = "genmo/mochi-1-preview"
-        self.model_cache : str = os.path.expanduser("~/.cache/huggingface/hub/models--genmo--mochi-1-preview")
+        base_cache = os.environ.get("HF_HUB_CACHE", os.path.join(os.getcwd(), "models"))
+        self.model_cache : str = os.path.join(base_cache, "models--genmo--mochi-1-preview")
         self.output_path: str = "./mochi_output.mp4"
         self.prompt     : str = "The camera follows behind a white vintage SUV with a black roof rack as it speeds up a steep dirt road surrounded by pine trees on a steep mountain slope, dust kicks up from it’s tires, the sunlight shines on the SUV as it speeds along the dirt road, casting a warm glow over the scene. The dirt road curves gently into the distance, with no other cars or vehicles in sight. The trees on either side of the road are redwoods, with patches of greenery scattered throughout. The car is seen from the rear following the curve with ease, making it seem as if it is on a rugged drive through the rugged terrain. The dirt road itself is surrounded by steep hills and mountains, with a clear blue sky above with wispy clouds."
         self.negative_prompt : str = ""

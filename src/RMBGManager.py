@@ -8,7 +8,7 @@ from torchvision import transforms
 from utils.helper import check_and_make_folder
 
 REPO_ID = "briaai/RMBG-2.0"
-MODEL_CACHE = os.path.expanduser("~/.cache/huggingface/hub/models--briaai--RMBG-2.0/")
+MODEL_CACHE = os.path.join(os.environ.get("HF_HUB_CACHE", os.path.join(os.getcwd(), "models")), "models--briaai--RMBG-2.0/")
 
 def crop_bottom_transparent(layer_img):
     """

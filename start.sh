@@ -60,5 +60,8 @@ fi
 export PYTORCH_ENABLE_MPS_FALLBACK=1
 export ACCELERATE_USE_MPS_DEVICE=1
 export PYTORCH_MPS_TENSOR_CORE_ENABLED=1
+export HF_HUB_CACHE="$(pwd)/models"
+export HF_HOME="$(pwd)/models"
+mkdir -p "$HF_HUB_CACHE"
 
 python ui_app.py
