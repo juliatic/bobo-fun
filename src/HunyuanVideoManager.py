@@ -75,6 +75,12 @@ class HunyuanVideoManager():
         
         # check output folder
         check_and_make_folder(self.output_path)
+        # enforce valid dimensions for the pipeline
+        self.width = max(16, (self.width // 16) * 16)
+        self.height = max(16, (self.height // 16) * 16)
+        # conservative frame cap for Apple Silicon
+        if torch.backends.mps.is_available() and self.num_frames > 61:
+            self.num_frames = 61
 
     @torch.inference_mode()
     def generate(self):
@@ -164,7 +170,7 @@ class HunyuanVideoManager():
         print("start decode latents")
         with torch.no_grad():
             # decode latents
-            latents = latents.to(vae.dtype) / vae.config.scaling_factor
+            latents = latents.to(device=vae.device, dtype=vae.dtype) / vae.config.scaling_factor
             video = vae.decode(latents, return_dict=False)[0]
             # video Process
             vae_scale_factor_spatial = (vae.spatial_compression_ratio if vae is not None else 8)
@@ -175,7 +181,7 @@ class HunyuanVideoManager():
         index = len([path for path in os.listdir(self.output_path)]) + 1
         prefix = str(index).zfill(8)
         video_name = os.path.join(self.output_path, prefix + ".mp4")
-        export_to_video(video[0], video_name, fps=self.fps)
+        export_to_video(video, video_name, fps=self.fps)
 
     def set_prompt(self, prompt : str) -> None:
             self.prompt = prompt
